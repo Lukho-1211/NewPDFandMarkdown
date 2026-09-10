@@ -1,7 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
+import { canUploadRole } from "@/lib/auth";
 import { buildWorksheetPdf } from "@/lib/build-worksheet-pdf";
 import { sanitizeMarkdown } from "@/lib/sanitize-markdown";
+import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -24,6 +26,29 @@ Rules:
 8. Prefer clear line breaks between questions.`;
 
 export async function POST(request: Request) {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims?.sub;
+  if (typeof userId !== "string") {
+    return NextResponse.json(
+      { error: "Sign in to convert a worksheet." },
+      { status: 401 },
+    );
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!canUploadRole(profile?.role)) {
+    return NextResponse.json(
+      { error: "Only teachers and admins can upload worksheets." },
+      { status: 403 },
+    );
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(

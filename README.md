@@ -1,9 +1,11 @@
-# Ember Maths12 — PDF to Markdown
+# Ember Maths12 — class planner
 
-Upload a scanned maths PDF. Download:
+Shared **Term → Week → Day** calendar for Grade 12 maths worksheets.
 
-1. **Markdown** — Unicode maths (no LaTeX)
-2. **PDF** — recreated worksheet headed **Ember Maths12**
+- **Teachers and admins** create terms, upload a scanned PDF, and replace a day’s worksheet.
+- **Students** open the same calendar and download Markdown plus the Ember Maths12 PDF.
+
+Conversion still uses `POST /api/convert`. Files are stored in Supabase (Postgres metadata + Storage PDFs).
 
 ## Setup
 
@@ -12,14 +14,16 @@ npm install
 cp .env.example .env.local
 ```
 
-Add your Gemini key to `.env.local`:
+Add keys to `.env.local`:
 
 ```
 GEMINI_API_KEY=your_key_here
 GEMINI_MODEL=gemini-3.6-flash
+NEXT_PUBLIC_SUPABASE_URL=your_project_url
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_publishable_key
 ```
 
-Get a key at [Google AI Studio](https://aistudio.google.com/apikey).
+Get a Gemini key at [Google AI Studio](https://aistudio.google.com/apikey). Sign in with an existing Ember Maths12 account (teacher, admin, or student).
 
 ## Run
 
@@ -27,4 +31,4 @@ Get a key at [Google AI Studio](https://aistudio.google.com/apikey).
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), drop a scanned maths PDF, then download the Markdown and branded PDF.
+Open [http://localhost:3000](http://localhost:3000), sign in, then open a term, week, and day.

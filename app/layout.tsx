@@ -14,9 +14,9 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "Ember Maths12 — PDF to Markdown",
+  title: "Ember Maths12 — Class planner",
   description:
-    "Upload a scanned maths PDF. Download Unicode Markdown and a recreated Ember Maths12 worksheet PDF.",
+    "Shared Term, Week, and Day planner. Teachers upload worksheets. Students download Markdown and PDF.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
