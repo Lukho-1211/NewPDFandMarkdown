@@ -1,68 +1,283 @@
-import Image from "next/image";
+"use client";
+
+import {
+  CheckCircle,
+  FilePdf,
+  FileText,
+  SpinnerGap,
+  UploadSimple,
+  WarningCircle,
+  X,
+} from "@phosphor-icons/react";
+import { useCallback, useRef, useState } from "react";
+
+const MAX_BYTES = 20 * 1024 * 1024;
+
+type Status = "idle" | "working" | "done" | "error";
+
+type Result = {
+  markdown: string;
+  pdfBase64: string;
+  fileName: string;
+};
+
+function downloadText(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadBase64Pdf(filename: string, base64: string) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function Home() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [status, setStatus] = useState<Status>("idle");
+  const [phase, setPhase] = useState("Reading scan…");
+  const [error, setError] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [result, setResult] = useState<Result | null>(null);
+
+  const reset = () => {
+    setStatus("idle");
+    setError(null);
+    setFileName(null);
+    setResult(null);
+    setPhase("Reading scan…");
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  const convert = useCallback(async (file: File) => {
+    if (file.type && file.type !== "application/pdf") {
+      setStatus("error");
+      setError("Only PDF files are accepted.");
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      setStatus("error");
+      setError("File is too large. Maximum size is 20 MB.");
+      return;
+    }
+
+    setFileName(file.name);
+    setStatus("working");
+    setError(null);
+    setResult(null);
+    setPhase("Reading scan…");
+
+    const form = new FormData();
+    form.append("file", file);
+
+    const phaseTimer = window.setTimeout(() => {
+      setPhase("Building worksheet…");
+    }, 2500);
+
+    try {
+      const res = await fetch("/api/convert", {
+        method: "POST",
+        body: form,
+      });
+      const data = (await res.json()) as Result & { error?: string };
+      if (!res.ok) {
+        throw new Error(data.error || "Conversion failed.");
+      }
+      setResult({
+        markdown: data.markdown,
+        pdfBase64: data.pdfBase64,
+        fileName: data.fileName,
+      });
+      setStatus("done");
+    } catch (err) {
+      setStatus("error");
+      setError(err instanceof Error ? err.message : "Conversion failed.");
+    } finally {
+      window.clearTimeout(phaseTimer);
+    }
+  }, []);
+
+  const onFiles = (files: FileList | null) => {
+    const file = files?.[0];
+    if (file) void convert(file);
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="flex flex-1 flex-col">
+      <header className="border-b-[3px] border-ember-amber bg-ember-navy">
+        <div className="mx-auto flex max-w-3xl items-end justify-between px-6 pb-5 pt-8">
+          <div>
+            <p
+              className="font-[family-name:var(--font-outfit)] text-2xl font-semibold tracking-tight text-ember-amber md:text-3xl"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              Ember Maths12
+            </p>
+            <p className="mt-1 max-w-md text-sm text-ember-muted">
+              Upload a scanned maths PDF. Get Unicode Markdown and a recreated worksheet.
+            </p>
+          </div>
+          <div className="hidden h-1.5 w-16 rounded-full bg-ember-muted/40 sm:block" aria-hidden />
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        <div className="h-px bg-ember-muted/80" />
+      </header>
+
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-10">
+        {status === "idle" && (
+          <div
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                inputRef.current?.click();
+              }
+            }}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              onFiles(e.dataTransfer.files);
+            }}
+            onClick={() => inputRef.current?.click()}
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-16 text-center transition-colors duration-200 ${
+              dragOver
+                ? "border-ember-amber bg-ember-amber/10"
+                : "border-ember-muted/40 bg-white/[0.03] hover:border-ember-amber/70 hover:bg-white/[0.05]"
+            }`}
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-ember-amber/15 text-ember-amber">
+              <UploadSimple size={28} weight="bold" aria-hidden />
+            </span>
+            <p className="mt-5 font-[family-name:var(--font-outfit)] text-lg font-semibold text-ember-paper">
+              Drop your scanned PDF here
+            </p>
+            <p className="mt-2 text-sm text-ember-muted">
+              or click to browse · PDF only · max 20 MB
+            </p>
+            <input
+              ref={inputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              className="sr-only"
+              onChange={(e) => onFiles(e.target.files)}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+          </div>
+        )}
+
+        {status === "working" && (
+          <div className="flex flex-col items-center rounded-2xl border border-ember-muted/25 bg-white/[0.03] px-6 py-16 text-center">
+            <SpinnerGap
+              size={36}
+              className="animate-spin text-ember-amber"
+              weight="bold"
+              aria-hidden
+            />
+            <p className="mt-5 font-[family-name:var(--font-outfit)] text-lg font-semibold">
+              {phase}
+            </p>
+            {fileName && (
+              <p className="mt-2 truncate text-sm text-ember-muted">{fileName}</p>
+            )}
+          </div>
+        )}
+
+        {status === "error" && (
+          <div className="rounded-2xl border border-red-400/40 bg-red-950/40 px-6 py-10 text-center">
+            <WarningCircle size={36} className="mx-auto text-red-300" weight="fill" aria-hidden />
+            <p className="mt-4 font-[family-name:var(--font-outfit)] text-lg font-semibold text-ember-paper">
+              Could not convert
+            </p>
+            <p className="mx-auto mt-2 max-w-md text-sm text-ember-muted">{error}</p>
+            <button
+              type="button"
+              onClick={reset}
+              className="mt-6 inline-flex cursor-pointer items-center gap-2 rounded-full bg-ember-amber px-5 py-2.5 text-sm font-semibold text-ember-ink transition-transform duration-150 hover:brightness-105 active:scale-[0.98]"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {status === "done" && result && (
+          <div className="rounded-2xl border border-ember-muted/25 bg-white/[0.03] px-6 py-10">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <CheckCircle size={28} className="text-ember-amber" weight="fill" aria-hidden />
+                <div>
+                  <p className="font-[family-name:var(--font-outfit)] text-lg font-semibold">
+                    Ready to download
+                  </p>
+                  <p className="text-sm text-ember-muted">{fileName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={reset}
+                aria-label="Start over"
+                className="cursor-pointer rounded-full p-2 text-ember-muted transition-colors hover:bg-white/10 hover:text-ember-paper"
+              >
+                <X size={20} weight="bold" />
+              </button>
+            </div>
+
+            <div className="mt-8 grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadText(
+                    `${result.fileName}.md`,
+                    result.markdown,
+                    "text/markdown;charset=utf-8",
+                  )
+                }
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-ember-amber px-4 py-3.5 text-sm font-semibold text-ember-ink transition-transform duration-150 hover:brightness-105 active:scale-[0.98]"
+              >
+                <FileText size={20} weight="bold" aria-hidden />
+                Download Markdown
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  downloadBase64Pdf(`${result.fileName}-ember.pdf`, result.pdfBase64)
+                }
+                className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-ember-muted/50 bg-ember-paper px-4 py-3.5 text-sm font-semibold text-ember-navy transition-transform duration-150 hover:bg-ember-muted active:scale-[0.98]"
+              >
+                <FilePdf size={20} weight="bold" aria-hidden />
+                Download PDF
+              </button>
+            </div>
+          </div>
+        )}
+
+        <p className="mt-auto pt-10 text-center text-xs text-ember-muted/70">
+          Scans are sent to Gemini for transcription and are not stored on this server.
+        </p>
       </main>
     </div>
   );
