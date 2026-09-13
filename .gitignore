@@ -43,5 +43,8 @@ next-env.d.ts
 
 # local smoke / verify artifacts
 smoke-output.pdf
+smoke-output-text.pdf
+smoke-figure-*.png
+smoke-source.pdf
 verify-ui.png
 verify-error.png

@@ -2,6 +2,10 @@ import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  FIGURE_MARKER_RE,
+  type WorksheetFigureImage,
+} from "@/lib/worksheet-figures";
 
 const COLORS = {
   navy: rgb(0x14 / 255, 0x21 / 255, 0x3d / 255),
@@ -9,6 +13,7 @@ const COLORS = {
   muted: rgb(0xe5 / 255, 0xe5 / 255, 0xe5 / 255),
   paper: rgb(1, 1, 1),
   ink: rgb(0, 0, 0),
+  caption: rgb(0x3d / 255, 0x3d / 255, 0x3d / 255),
 };
 
 const A4 = { width: 595.28, height: 841.89 };
@@ -17,6 +22,9 @@ const HEADER_HEIGHT = 64;
 const FOOTER_Y = 36;
 const BODY_TOP = A4.height - HEADER_HEIGHT - 28;
 const LINE_GAP = 4;
+const FIGURE_MAX_HEIGHT = 320;
+const FIGURE_GAP = 8;
+const CAPTION_SIZE = 9;
 
 type Run = { text: string; bold?: boolean };
 
@@ -155,15 +163,30 @@ function drawFooter(page: PDFPage, font: PDFFont, pageNumber: number, totalPages
   });
 }
 
-export async function buildWorksheetPdf(markdown: string): Promise<Uint8Array> {
+export async function buildWorksheetPdf(
+  markdown: string,
+  figures: WorksheetFigureImage[] = [],
+): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const { regular, bold } = await loadFonts(doc);
   const maxWidth = A4.width - MARGIN_X * 2;
+
+  const figureById = new Map(figures.map((f) => [f.id, f]));
+  const embeddedById = new Map<number, Awaited<ReturnType<PDFDocument["embedPng"]>>>();
+
+  for (const fig of figures) {
+    try {
+      embeddedById.set(fig.id, await doc.embedPng(fig.pngBytes));
+    } catch {
+      throw new Error(`Could not embed figure ${fig.id} as a PNG image.`);
+    }
+  }
 
   type Block =
     | { kind: "heading"; level: number; runs: Run[] }
     | { kind: "para"; runs: Run[] }
     | { kind: "list"; ordered: boolean; index: number; runs: Run[] }
+    | { kind: "figure"; id: number }
     | { kind: "blank" };
 
   const blocks: Block[] = [];
@@ -175,6 +198,17 @@ export async function buildWorksheetPdf(markdown: string): Promise<Uint8Array> {
     if (!line.trim()) {
       blocks.push({ kind: "blank" });
       listCounter = 0;
+      continue;
+    }
+
+    const figureMatch = FIGURE_MARKER_RE.exec(line.trim());
+    if (figureMatch) {
+      listCounter = 0;
+      const id = Number(figureMatch[1]);
+      if (!figureById.has(id) || !embeddedById.has(id)) {
+        throw new Error(`Markdown references [[FIG:${id}]] but no image crop is available.`);
+      }
+      blocks.push({ kind: "figure", id });
       continue;
     }
 
@@ -238,6 +272,7 @@ export async function buildWorksheetPdf(markdown: string): Promise<Uint8Array> {
     size: number,
     indent: number,
     prefix?: string,
+    color = COLORS.ink,
   ) => {
     const prefixWidth = prefix
       ? regular.widthOfTextAtSize(prefix, size) + 6
@@ -254,7 +289,7 @@ export async function buildWorksheetPdf(markdown: string): Promise<Uint8Array> {
           y,
           size,
           font: regular,
-          color: COLORS.ink,
+          color,
         });
         x += prefixWidth;
       } else if (prefix) {
@@ -268,7 +303,7 @@ export async function buildWorksheetPdf(markdown: string): Promise<Uint8Array> {
           y,
           size,
           font,
-          color: COLORS.ink,
+          color,
         });
         x += font.widthOfTextAtSize(run.text, size);
       }
@@ -276,9 +311,70 @@ export async function buildWorksheetPdf(markdown: string): Promise<Uint8Array> {
     }
   };
 
+  const drawFigure = (id: number) => {
+    const meta = figureById.get(id);
+    const image = embeddedById.get(id);
+    if (!meta || !image) {
+      throw new Error(`Missing crop for figure ${id}.`);
+    }
+
+    const scale = Math.min(
+      maxWidth / image.width,
+      FIGURE_MAX_HEIGHT / image.height,
+      1,
+    );
+    const drawWidth = image.width * scale;
+    const drawHeight = image.height * scale;
+    const caption = `Figure: ${meta.description}`;
+    const captionLines = wrapRuns(
+      [{ text: caption }],
+      maxWidth,
+      regular,
+      bold,
+      CAPTION_SIZE,
+    );
+    const captionBlockHeight = captionLines.length * (CAPTION_SIZE + LINE_GAP);
+    const totalNeeded = FIGURE_GAP + drawHeight + 4 + captionBlockHeight + FIGURE_GAP;
+
+    ensureSpace(totalNeeded);
+    y -= FIGURE_GAP;
+
+    const x = MARGIN_X + (maxWidth - drawWidth) / 2;
+    page.drawImage(image, {
+      x,
+      y: y - drawHeight,
+      width: drawWidth,
+      height: drawHeight,
+    });
+    y -= drawHeight + 4;
+
+    for (const line of captionLines) {
+      ensureSpace(CAPTION_SIZE + LINE_GAP);
+      let xPos = MARGIN_X;
+      for (const run of line) {
+        if (!run.text) continue;
+        page.drawText(run.text, {
+          x: xPos,
+          y,
+          size: CAPTION_SIZE,
+          font: regular,
+          color: COLORS.caption,
+        });
+        xPos += regular.widthOfTextAtSize(run.text, CAPTION_SIZE);
+      }
+      y -= CAPTION_SIZE + LINE_GAP;
+    }
+    y -= FIGURE_GAP;
+  };
+
   for (const block of blocks) {
     if (block.kind === "blank") {
       y -= 10;
+      continue;
+    }
+
+    if (block.kind === "figure") {
+      drawFigure(block.id);
       continue;
     }
 
@@ -304,13 +400,6 @@ export async function buildWorksheetPdf(markdown: string): Promise<Uint8Array> {
 
   const total = pages.length;
   pages.forEach((p, i) => drawFooter(p, regular, i + 1, total));
-
-  // Fill page backgrounds behind content? pdf-lib draws in order; white is default.
-  // Explicitly paint paper on each page under header for clarity.
-  for (const p of pages) {
-    // Content already drawn; skip re-painting to avoid covering text.
-    void p;
-  }
 
   const bytes = await doc.save();
   return bytes;

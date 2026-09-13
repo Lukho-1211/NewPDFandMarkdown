@@ -1,8 +1,17 @@
 /**
  * Strip common LaTeX leftovers if the model slips, keeping Unicode maths.
+ * Preserves [[FIG:n]] markers used for graph crop placement.
  */
 export function sanitizeMarkdown(input: string): string {
   let text = input.trim();
+
+  // Protect figure markers from LaTeX/cleanup passes
+  const markers: string[] = [];
+  text = text.replace(/\[\[FIG:\d+\]\]/g, (match) => {
+    const token = `@@FIGMARKER${markers.length}@@`;
+    markers.push(match);
+    return token;
+  });
 
   // Remove markdown code fences if the model wraps the whole answer
   if (text.startsWith("```")) {
@@ -71,6 +80,11 @@ export function sanitizeMarkdown(input: string): string {
   // Normalise whitespace
   text = text.replace(/[ \t]+\n/g, "\n");
   text = text.replace(/\n{3,}/g, "\n\n");
+
+  // Restore figure markers
+  text = text.replace(/@@FIGMARKER(\d+)@@/g, (_full, indexText: string) => {
+    return markers[Number(indexText)] ?? "";
+  });
 
   return text.trim();
 }
